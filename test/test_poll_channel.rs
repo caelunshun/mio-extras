@@ -1,8 +1,8 @@
 use crate::expect_events;
+use crossbeam::channel::TryRecvError;
 use mio::event::Event;
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::channel;
-use std::sync::mpsc::TryRecvError;
 use std::thread;
 use std::time::Duration;
 

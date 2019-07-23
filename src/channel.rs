@@ -1,32 +1,20 @@
 //! Thread safe communication channel implementing `Evented`
+use crossbeam::channel as ch;
 use lazycell::{AtomicLazyCell, LazyCell};
 use mio::{Evented, Poll, PollOpt, Ready, Registration, SetReadiness, Token};
 use std::any::Any;
 use std::error;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::{fmt, io};
 
 /// Creates a new asynchronous channel, where the `Receiver` can be registered
 /// with `Poll`.
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let (tx_ctl, rx_ctl) = ctl_pair();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = ch::unbounded();
 
     let tx = Sender { tx, ctl: tx_ctl };
-
-    let rx = Receiver { rx, ctl: rx_ctl };
-
-    (tx, rx)
-}
-
-/// Creates a new synchronous, bounded channel where the `Receiver` can be
-/// registered with `Poll`.
-pub fn sync_channel<T>(bound: usize) -> (SyncSender<T>, Receiver<T>) {
-    let (tx_ctl, rx_ctl) = ctl_pair();
-    let (tx, rx) = mpsc::sync_channel(bound);
-
-    let tx = SyncSender { tx, ctl: tx_ctl };
 
     let rx = Receiver { rx, ctl: rx_ctl };
 
@@ -65,19 +53,13 @@ struct ReceiverCtl {
 
 /// The sending half of a channel.
 pub struct Sender<T> {
-    tx: mpsc::Sender<T>,
-    ctl: SenderCtl,
-}
-
-/// The sending half of a synchronous channel.
-pub struct SyncSender<T> {
-    tx: mpsc::SyncSender<T>,
+    tx: ch::Sender<T>,
     ctl: SenderCtl,
 }
 
 /// The receiving half of a channel.
 pub struct Receiver<T> {
-    rx: mpsc::Receiver<T>,
+    rx: ch::Receiver<T>,
     ctl: ReceiverCtl,
 }
 
@@ -130,42 +112,9 @@ impl<T> Clone for Sender<T> {
     }
 }
 
-impl<T> SyncSender<T> {
-    /// Sends a value on this synchronous channel.
-    ///
-    /// This function will *block* until space in the internal buffer becomes
-    /// available or a receiver is available to hand off the message to.
-    pub fn send(&self, t: T) -> Result<(), SendError<T>> {
-        self.tx.send(t).map_err(From::from).and_then(|_| {
-            self.ctl.inc()?;
-            Ok(())
-        })
-    }
-
-    /// Attempts to send a value on this channel without blocking.
-    ///
-    /// This method differs from `send` by returning immediately if the channel's
-    /// buffer is full or no receiver is waiting to acquire some data.
-    pub fn try_send(&self, t: T) -> Result<(), TrySendError<T>> {
-        self.tx.try_send(t).map_err(From::from).and_then(|_| {
-            self.ctl.inc()?;
-            Ok(())
-        })
-    }
-}
-
-impl<T> Clone for SyncSender<T> {
-    fn clone(&self) -> SyncSender<T> {
-        SyncSender {
-            tx: self.tx.clone(),
-            ctl: self.ctl.clone(),
-        }
-    }
-}
-
 impl<T> Receiver<T> {
     /// Attempts to return a pending value on this receiver without blocking.
-    pub fn try_recv(&self) -> Result<T, mpsc::TryRecvError> {
+    pub fn try_recv(&self) -> Result<T, ch::TryRecvError> {
         self.rx.try_recv().and_then(|res| {
             let _ = self.ctl.dec();
             Ok(res)
@@ -331,8 +280,8 @@ impl Evented for ReceiverCtl {
  *
  */
 
-impl<T> From<mpsc::SendError<T>> for SendError<T> {
-    fn from(src: mpsc::SendError<T>) -> SendError<T> {
+impl<T> From<ch::SendError<T>> for SendError<T> {
+    fn from(src: ch::SendError<T>) -> SendError<T> {
         SendError::Disconnected(src.0)
     }
 }
@@ -343,17 +292,17 @@ impl<T> From<io::Error> for SendError<T> {
     }
 }
 
-impl<T> From<mpsc::TrySendError<T>> for TrySendError<T> {
-    fn from(src: mpsc::TrySendError<T>) -> TrySendError<T> {
+impl<T> From<ch::TrySendError<T>> for TrySendError<T> {
+    fn from(src: ch::TrySendError<T>) -> TrySendError<T> {
         match src {
-            mpsc::TrySendError::Full(v) => TrySendError::Full(v),
-            mpsc::TrySendError::Disconnected(v) => TrySendError::Disconnected(v),
+            ch::TrySendError::Full(v) => TrySendError::Full(v),
+            ch::TrySendError::Disconnected(v) => TrySendError::Disconnected(v),
         }
     }
 }
 
-impl<T> From<mpsc::SendError<T>> for TrySendError<T> {
-    fn from(src: mpsc::SendError<T>) -> TrySendError<T> {
+impl<T> From<ch::SendError<T>> for TrySendError<T> {
+    fn from(src: ch::SendError<T>) -> TrySendError<T> {
         TrySendError::Disconnected(src.0)
     }
 }
