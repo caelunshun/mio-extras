@@ -1,6 +1,6 @@
 //! Thread safe communication channel implementing `Evented`
 use crossbeam::channel as ch;
-use lazycell::{AtomicLazyCell, LazyCell};
+use lazycell::AtomicLazyCell;
 use mio::{Evented, Poll, PollOpt, Ready, Registration, SetReadiness, Token};
 use std::any::Any;
 use std::error;
@@ -33,7 +33,7 @@ fn ctl_pair() -> (SenderCtl, ReceiverCtl) {
     };
 
     let rx = ReceiverCtl {
-        registration: LazyCell::new(),
+        registration: AtomicLazyCell::new(),
         inner,
     };
 
@@ -47,7 +47,7 @@ struct SenderCtl {
 
 /// Tracks messages received on a channel in order to track readiness.
 struct ReceiverCtl {
-    registration: LazyCell<Registration>,
+    registration: AtomicLazyCell<Registration>,
     inner: Arc<Inner>,
 }
 
